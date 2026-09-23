@@ -1,0 +1,72 @@
+name: Build Telegram-iOS
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read versions.json
+        id: v
+        run: |
+          echo "xcode=$(jq -r .xcode versions.json)" >> $GITHUB_OUTPUT
+          echo "bazel=$(jq -r .bazel versions.json)" >> $GITHUB_OUTPUT
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ steps.v.outputs.xcode }}
+
+      - name: Install Bazel
+        run: |
+          ARCH=$(uname -m); [ "$ARCH" = "arm64" ] || ARCH=x86_64
+          V=${{ steps.v.outputs.bazel }}
+          curl -fL -o bazel "https://github.com/bazelbuild/bazel/releases/download/$V/bazel-$V-darwin-$ARCH"
+          chmod +x bazel
+          echo "BAZEL=$PWD/bazel" >> $GITHUB_ENV
+
+      - name: Make config
+        env:
+          API_ID: ${{ secrets.TG_API_ID }}
+          API_HASH: ${{ secrets.TG_API_HASH }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          jq --arg id "$API_ID" --arg h "$API_HASH" --arg t "$TEAM_ID" \
+            '.api_id=$id | .api_hash=$h | .team_id=$t | .bundle_id="org.kernelgram.deza"' \
+            build-system/template_minimal_development_configuration.json > config.json
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ github.run_id }}
+          restore-keys: bazel-
+
+      - name: Build
+        timeout-minutes: 330
+        run: |
+          python3 build-system/Make/Make.py \
+            --bazel="$BAZEL" \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=config.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --buildNumber=100001 \
+            --configuration=release_arm64
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ github.run_id }}
+
+      - name: Collect IPA
+        run: |
+          mkdir out
+          find -L . -name "*.ipa" -exec cp {} out/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telegram-ipa
+          path: out/*.ipa
