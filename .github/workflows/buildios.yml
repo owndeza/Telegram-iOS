@@ -23,8 +23,7 @@ jobs:
           API_ID: ${{ secrets.TG_API_ID }}
           API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
-          jq --arg id "$API_ID" --arg h "$API_HASH" \
-            '.api_id=$id | .api_hash=$h' \
+          jq '.api_id="12345" | .api_hash="0123456789abcdef0123456789abcdef"' \
             build-system/appstore-configuration.json > config.json
           cat config.json | sed 's/"api_hash": ".*"/"api_hash": "***"/'
 
